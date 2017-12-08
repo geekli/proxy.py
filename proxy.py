@@ -287,9 +287,11 @@ class Server(Connection):
     def __init__(self, host, port):
         super(Server, self).__init__(b'server')
         self.addr = (host, int(port))
-    
+        self.bind_ip = None # outbond ip address
     def connect(self):
         self.conn = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        if self.bind_ip:
+            self.conn.bind((self.bind_ip, 0))
         self.conn.connect((self.addr[0], self.addr[1]))
 
 class Client(Connection):
@@ -327,7 +329,7 @@ class Proxy(multiprocessing.Process):
         
         self.client = client
         self.server = None
-        
+        self.bind_ip = None
         self.request = HttpParser()
         self.response = HttpParser(HTTP_RESPONSE_PARSER)
         
@@ -369,6 +371,8 @@ class Proxy(multiprocessing.Process):
                 host, port = self.request.url.hostname, self.request.url.port if self.request.url.port else 80
             
             self.server = Server(host, port)
+            if self.bind_ip:
+                self.server.bind_ip = self.bind_ip
             try:
                 logger.debug('connecting to server %s:%s' % (host, port))
                 self.server.connect()
@@ -507,10 +511,11 @@ class Proxy(multiprocessing.Process):
 class TCP(object):
     """TCP server implementation."""
     
-    def __init__(self, hostname='127.0.0.1', port=8899, backlog=100):
+    def __init__(self, hostname='127.0.0.1', port=8899, backlog=100, bind_ip=None):
         self.hostname = hostname
         self.port = port
         self.backlog = backlog
+        self.bind_ip = bind_ip
     
     def handle(self, client):
         raise NotImplementedError()
@@ -518,6 +523,8 @@ class TCP(object):
     def run(self):
         try:
             logger.info('Starting server on port %d' % self.port)
+            if self.bind_ip:
+                logger.info('Outbound ip address: %s' % self.bind_ip)
             self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             self.socket.bind((self.hostname, self.port))
@@ -541,6 +548,7 @@ class HTTP(TCP):
     
     def handle(self, client):
         proc = Proxy(client)
+        proc.bind_ip = self.bind_ip
         proc.daemon = True
         proc.start()
         logger.debug('Started process %r to handle connection %r' % (proc, client.conn))
@@ -554,6 +562,7 @@ def main():
     parser.add_argument('--hostname', default='127.0.0.1', help='Default: 127.0.0.1')
     parser.add_argument('--port', default='8899', help='Default: 8899')
     parser.add_argument('--log-level', default='INFO', help='DEBUG, INFO, WARNING, ERROR, CRITICAL')
+    parser.add_argument('--bind-ip', default='', help='outbound address ip')
     args = parser.parse_args()
     
     logging.basicConfig(level=getattr(logging, args.log_level), format='%(asctime)s - %(levelname)s - pid:%(process)d - %(message)s')
@@ -562,7 +571,7 @@ def main():
     port = int(args.port)
     
     try:
-        proxy = HTTP(hostname, port)
+        proxy = HTTP(hostname, port, bind_ip = args.bind_ip)
         proxy.run()
     except KeyboardInterrupt:
         pass
