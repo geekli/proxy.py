@@ -186,7 +186,10 @@ class HttpParser(object):
             self.code = line[1]
             self.reason = b' '.join(line[2:])
         self.state = HTTP_PARSER_STATE_LINE_RCVD
-    
+        if self.method == b"CONNECT":
+            if self.raw.endswith(CRLF*2): #For python requests
+                self.state = HTTP_PARSER_STATE_COMPLETE
+                
     def process_header(self, data):
         if len(data) == 0:
             if self.state == HTTP_PARSER_STATE_RCVING_HEADERS:
